@@ -277,6 +277,8 @@ const extensionWatcher = {
 const extensionDevelopmentFolder = {
   getDevelopmentFolders: vi.fn(),
   onNeedToLoadExension: vi.fn(),
+  addExternalExtensionId: vi.fn(),
+  removeExternalExtensionId: vi.fn(),
 } as unknown as ExtensionDevelopmentFolders;
 
 const extensionAnalyzer = {
@@ -310,6 +312,8 @@ vi.mock('../../util.js', async () => {
     getBase64Image: vi.fn(),
   };
 });
+
+vi.mock('node:fs/promises');
 
 /* eslint-disable @typescript-eslint/no-empty-function */
 beforeEach(() => {
@@ -383,19 +387,19 @@ test('Should watch for files and load them at startup', async () => {
     isFile: () => true,
     isDirectory: () => false,
     name: 'foo.cdix',
-  } as unknown as fs.Dirent;
+  } as unknown as fs.Dirent<Buffer<ArrayBufferLike>>;
 
   const ent2 = {
     isFile: () => true,
     isDirectory: () => false,
     name: 'bar.foo',
-  } as unknown as fs.Dirent;
+  } as unknown as fs.Dirent<Buffer<ArrayBufferLike>>;
 
   const ent3 = {
     isFile: () => false,
     isDirectory: () => true,
     name: 'baz',
-  } as unknown as fs.Dirent;
+  } as unknown as fs.Dirent<Buffer<ArrayBufferLike>>;
   readdirMock.mockResolvedValue([ent1, ent2, ent3]);
 
   // mock loadPackagedFile
@@ -574,7 +578,7 @@ test('Verify extension load', async () => {
     path: 'dummy',
     api: {} as typeof containerDesktopAPI,
     mainPath: '',
-    removable: false,
+    removable: true,
     manifest: {
       version: '1.1',
     },
@@ -587,6 +591,12 @@ test('Verify extension load', async () => {
     'loadExtension.error',
     expect.objectContaining({ extensionId: id, extensionVersion: '1.1' }),
   );
+
+  expect(extensionDevelopmentFolder.addExternalExtensionId).toBeCalledWith(id);
+
+  // remove extension
+  await extensionLoader.removeExtension(id);
+  expect(extensionDevelopmentFolder.removeExternalExtensionId).toBeCalledWith(id);
 });
 
 test('Verify extension do not add configuration to subscriptions', async () => {
@@ -2330,27 +2340,27 @@ test('withProgress should add the extension id to the routeId', async () => {
 describe('loading extension folders', () => {
   const fileEntry = {
     isDirectory: () => false,
-  } as fs.Dirent;
+  } as unknown as fs.Dirent<Buffer<ArrayBufferLike>>;
   const nodeModulesEntry = {
     isDirectory: () => true,
     name: 'node_modules',
-  } as fs.Dirent;
+  } as unknown as fs.Dirent<Buffer<ArrayBufferLike>>;
   const dirEntry = {
     isDirectory: () => true,
     name: 'extension1',
-  } as fs.Dirent;
+  } as unknown as fs.Dirent<Buffer<ArrayBufferLike>>;
   const dirEntry2 = {
     isDirectory: () => true,
     name: 'extension2',
-  } as fs.Dirent;
+  } as unknown as fs.Dirent<Buffer<ArrayBufferLike>>;
   const dirEntry3 = {
     isDirectory: () => true,
     name: 'extension3',
-  } as fs.Dirent;
+  } as unknown as fs.Dirent<Buffer<ArrayBufferLike>>;
   const dirEntry4 = {
     isDirectory: () => true,
     name: 'extension4',
-  } as fs.Dirent;
+  } as unknown as fs.Dirent<Buffer<ArrayBufferLike>>;
 
   describe('in dev mode', () => {
     beforeEach(() => {

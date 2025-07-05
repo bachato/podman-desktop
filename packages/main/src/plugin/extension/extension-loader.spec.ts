@@ -98,6 +98,10 @@ class TestExtensionLoader extends ExtensionLoader {
     return this.activatedExtensions;
   }
 
+  getAnalyzedExtensions(): Map<string, AnalyzedExtension> {
+    return this.analyzedExtensions;
+  }
+
   getExtensionStateErrors(): Map<string, unknown> {
     return this.extensionStateErrors;
   }
@@ -199,7 +203,7 @@ const onboardingRegistry: OnboardingRegistry = {
 } as unknown as OnboardingRegistry;
 
 const telemetryTrackMock = vi.fn();
-const telemetry: Telemetry = { track: telemetryTrackMock } as unknown as Telemetry;
+const telemetry: Telemetry = { aggregateTrack: vi.fn(), track: telemetryTrackMock } as unknown as Telemetry;
 
 const viewRegistry: ViewRegistry = {} as unknown as ViewRegistry;
 
@@ -277,6 +281,8 @@ const extensionWatcher = {
 const extensionDevelopmentFolder = {
   getDevelopmentFolders: vi.fn(),
   onNeedToLoadExension: vi.fn(),
+  addExternalExtensionId: vi.fn(),
+  removeExternalExtensionId: vi.fn(),
 } as unknown as ExtensionDevelopmentFolders;
 
 const extensionAnalyzer = {
@@ -310,6 +316,8 @@ vi.mock('../../util.js', async () => {
     getBase64Image: vi.fn(),
   };
 });
+
+vi.mock('node:fs/promises');
 
 /* eslint-disable @typescript-eslint/no-empty-function */
 beforeEach(() => {
@@ -383,19 +391,19 @@ test('Should watch for files and load them at startup', async () => {
     isFile: () => true,
     isDirectory: () => false,
     name: 'foo.cdix',
-  } as unknown as fs.Dirent;
+  } as unknown as fs.Dirent<Buffer<ArrayBufferLike>>;
 
   const ent2 = {
     isFile: () => true,
     isDirectory: () => false,
     name: 'bar.foo',
-  } as unknown as fs.Dirent;
+  } as unknown as fs.Dirent<Buffer<ArrayBufferLike>>;
 
   const ent3 = {
     isFile: () => false,
     isDirectory: () => true,
     name: 'baz',
-  } as unknown as fs.Dirent;
+  } as unknown as fs.Dirent<Buffer<ArrayBufferLike>>;
   readdirMock.mockResolvedValue([ent1, ent2, ent3]);
 
   // mock loadPackagedFile
@@ -481,6 +489,7 @@ test('Verify extension error leads to failed state', async () => {
       api: {} as typeof containerDesktopAPI,
       mainPath: '',
       removable: false,
+      devMode: false,
       manifest: {},
       subscriptions: [],
       readme: '',
@@ -511,6 +520,7 @@ test('Verify extension subscriptions are disposed when failed state reached', as
       api: {} as typeof containerDesktopAPI,
       mainPath: '',
       removable: false,
+      devMode: false,
       manifest: {},
       subscriptions: [],
       readme: '',
@@ -545,6 +555,7 @@ test('Verify extension activate with a long timeout is flagged as error', async 
       api: {} as typeof containerDesktopAPI,
       mainPath: '',
       removable: false,
+      devMode: false,
       manifest: {},
       subscriptions: [],
       readme: '',
@@ -574,7 +585,8 @@ test('Verify extension load', async () => {
     path: 'dummy',
     api: {} as typeof containerDesktopAPI,
     mainPath: '',
-    removable: false,
+    removable: true,
+    devMode: false,
     manifest: {
       version: '1.1',
     },
@@ -587,6 +599,12 @@ test('Verify extension load', async () => {
     'loadExtension.error',
     expect.objectContaining({ extensionId: id, extensionVersion: '1.1' }),
   );
+
+  expect(extensionDevelopmentFolder.addExternalExtensionId).toBeCalledWith(id);
+
+  // remove extension
+  await extensionLoader.removeExtension(id);
+  expect(extensionDevelopmentFolder.removeExternalExtensionId).toBeCalledWith(id);
 });
 
 test('Verify extension do not add configuration to subscriptions', async () => {
@@ -606,6 +624,7 @@ test('Verify extension do not add configuration to subscriptions', async () => {
     api: {} as typeof containerDesktopAPI,
     mainPath: '',
     removable: false,
+    devMode: false,
     manifest: {
       version: '1.1',
       contributes: {
@@ -1085,6 +1104,40 @@ describe('Removing extension by user', async () => {
     expect(extensionLoader.removeExtension).toBeCalledWith(ExtID);
     expect(telemetry.track).toBeCalledWith('removeExtension', { extensionId: ExtID, error: RemoveError });
   });
+
+  test('no error in dev mode', async () => {
+    const deactivateExtensionSpy = vi.spyOn(extensionLoader, 'deactivateExtension');
+    const fakeAnalyzedExtension = {
+      id: ExtID,
+      devMode: true,
+      manifest: {
+        name: 'name',
+        publisher: 'publisher',
+        version: '1.0.0',
+      },
+    };
+    extensionLoader.getAnalyzedExtensions().set(ExtID, fakeAnalyzedExtension as AnalyzedExtension);
+    await extensionLoader.removeExtension(ExtID);
+    expect(extensionDevelopmentFolder.removeExternalExtensionId).toBeCalledWith(ExtID);
+    expect(deactivateExtensionSpy).toBeCalledWith(ExtID);
+    expect(extensionLoader.getAnalyzedExtensions().size).toBe(0);
+  });
+
+  test('error if not in dev mode', async () => {
+    const deactivateExtensionSpy = vi.spyOn(extensionLoader, 'deactivateExtension');
+    const fakeAnalyzedExtension = {
+      id: ExtID,
+      devMode: false,
+      manifest: {
+        name: 'name',
+        publisher: 'publisher',
+        version: '1.0.0',
+      },
+    };
+    extensionLoader.getAnalyzedExtensions().set(ExtID, fakeAnalyzedExtension as AnalyzedExtension);
+    await expect(extensionLoader.removeExtension(ExtID)).rejects.toThrow('is not removable');
+    expect(deactivateExtensionSpy).toBeCalledWith(ExtID);
+  });
 });
 
 test('check dispose when deactivating', async () => {
@@ -1124,6 +1177,7 @@ test('Verify extension uri', async () => {
       api: {} as typeof containerDesktopAPI,
       mainPath: '',
       removable: false,
+      devMode: false,
       manifest: {},
       subscriptions: [],
       readme: '',
@@ -1157,6 +1211,7 @@ test('Verify exports and packageJSON', async () => {
       api: {} as typeof containerDesktopAPI,
       mainPath: '',
       removable: false,
+      devMode: false,
       manifest: {
         foo: 'bar',
       },
@@ -2184,7 +2239,7 @@ describe('extensionContext', async () => {
 
     expect(extensionContext).toBeDefined();
     expect(extensionContext?.secrets).toBeDefined();
-    expect(telemetry.track).toBeCalledWith('activateExtension', {
+    expect(telemetry.aggregateTrack).toBeCalledWith('activateExtensions', {
       extensionId: 'fooPublisher.fooName',
       extensionVersion: '1.0',
       duration: expect.any(Number),
@@ -2330,27 +2385,27 @@ test('withProgress should add the extension id to the routeId', async () => {
 describe('loading extension folders', () => {
   const fileEntry = {
     isDirectory: () => false,
-  } as fs.Dirent;
+  } as unknown as fs.Dirent<Buffer<ArrayBufferLike>>;
   const nodeModulesEntry = {
     isDirectory: () => true,
     name: 'node_modules',
-  } as fs.Dirent;
+  } as unknown as fs.Dirent<Buffer<ArrayBufferLike>>;
   const dirEntry = {
     isDirectory: () => true,
     name: 'extension1',
-  } as fs.Dirent;
+  } as unknown as fs.Dirent<Buffer<ArrayBufferLike>>;
   const dirEntry2 = {
     isDirectory: () => true,
     name: 'extension2',
-  } as fs.Dirent;
+  } as unknown as fs.Dirent<Buffer<ArrayBufferLike>>;
   const dirEntry3 = {
     isDirectory: () => true,
     name: 'extension3',
-  } as fs.Dirent;
+  } as unknown as fs.Dirent<Buffer<ArrayBufferLike>>;
   const dirEntry4 = {
     isDirectory: () => true,
     name: 'extension4',
-  } as fs.Dirent;
+  } as unknown as fs.Dirent<Buffer<ArrayBufferLike>>;
 
   describe('in dev mode', () => {
     beforeEach(() => {
